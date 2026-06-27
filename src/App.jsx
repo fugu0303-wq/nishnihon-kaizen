@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, push, onValue, serverTimestamp } from "firebase/database";
+import { getDatabase, ref, push, onValue, serverTimestamp, remove } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCiFTsc-mlhMdl2ZiM5xApmKKJju-o1JOg",
@@ -17,6 +17,7 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 const PASSCODE = "kaizen2024";
+const ADMIN_PASSCODE = "kaizen2024";
 
 const CATEGORIES = ["すべて", "AI活用", "販促・ポップ", "商品開発・レシピ", "オリジナルメニュー", "教育・人材育成", "清掃・オペレーション", "成果物・事例", "知識・ノウハウ"];
 
@@ -58,7 +59,7 @@ function CategoryBadge({ label }) {
   );
 }
 
-function PostCard({ post, onClick }) {
+function PostCard({ post, onClick, isAdmin, onDelete }) {
   const [liked, setLiked] = useState(false);
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
@@ -86,6 +87,14 @@ function PostCard({ post, onClick }) {
             >
               {liked ? "❤️" : "🤍"} {(post.likes || 0) + (liked ? 1 : 0)}
             </button>
+            {isAdmin && (
+              <button
+                className="flex items-center gap-1 text-sm text-red-400 hover:text-red-600"
+                onClick={e => { e.stopPropagation(); onDelete(post); }}
+              >
+                🗑️ 削除
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -188,6 +197,44 @@ function PostForm({ onClose }) {
   );
 }
 
+// 管理者ログインモーダル
+function AdminLogin({ onSuccess, onClose }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(false);
+
+  const handleAuth = () => {
+    if (code === ADMIN_PASSCODE) {
+      onSuccess();
+    } else {
+      setError(true);
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">🔐 管理者モード</h2>
+        <p className="text-sm text-gray-500 mb-4">パスコードを入力してください</p>
+        <input
+          className={`w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 ${error ? "border-red-400" : "border-gray-200"}`}
+          placeholder="パスコード"
+          type="password"
+          value={code}
+          onChange={e => setCode(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleAuth()}
+          autoFocus
+        />
+        {error && <p className="text-red-500 text-xs mt-1">パスコードが違います</p>}
+        <button className="w-full mt-3 bg-red-500 text-white font-bold py-3 rounded-xl disabled:opacity-40" disabled={code.length < 4} onClick={handleAuth}>
+          ログイン
+        </button>
+        <button className="w-full mt-2 text-gray-400 text-sm py-2" onClick={onClose}>キャンセル</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("timeline");
   const [selectedCategory, setSelectedCategory] = useState("すべて");
@@ -195,6 +242,9 @@ export default function App() {
   const [selectedPost, setSelectedPost] = useState(null);
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
     const postsRef = ref(db, "posts");
@@ -212,6 +262,17 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  const handleDelete = async (post) => {
+    setDeleteTarget(post);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    await remove(ref(db, `posts/${deleteTarget.id}`));
+    setDeleteTarget(null);
+    setSelectedPost(null);
+  };
+
   const filtered = selectedCategory === "すべて"
     ? posts
     : posts.filter(p => p.category === selectedCategory);
@@ -228,9 +289,20 @@ export default function App() {
               <div className="text-xs text-orange-500 font-semibold tracking-wide">西日本エリア</div>
               <h1 className="text-xl font-black text-gray-900 leading-tight">現場改善SNS</h1>
             </div>
-            <button className="bg-orange-500 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm" onClick={() => setShowPostForm(true)}>
-              ＋ 投稿
-            </button>
+            <div className="flex items-center gap-2">
+              <button className="bg-orange-500 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm" onClick={() => setShowPostForm(true)}>
+                ＋ 投稿
+              </button>
+              {isAdmin ? (
+                <button className="text-xs text-red-500 border border-red-200 px-2 py-1 rounded-lg" onClick={() => setIsAdmin(false)}>
+                  管理者OFF
+                </button>
+              ) : (
+                <button className="text-xs text-gray-400 border border-gray-200 px-2 py-1 rounded-lg" onClick={() => setShowAdminLogin(true)}>
+                  🔐
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex border-b border-gray-100">
@@ -247,6 +319,11 @@ export default function App() {
                 {c}
               </button>
             ))}
+          </div>
+        )}
+        {isAdmin && (
+          <div className="bg-red-50 px-4 py-2 text-xs text-red-600 font-bold text-center">
+            🔐 管理者モード ON — 全投稿の削除が可能です
           </div>
         )}
       </div>
@@ -272,7 +349,7 @@ export default function App() {
               </div>
             )}
             {filtered.map(post => (
-              <PostCard key={post.id} post={post} onClick={() => setSelectedPost(post)} />
+              <PostCard key={post.id} post={post} onClick={() => setSelectedPost(post)} isAdmin={isAdmin} onDelete={handleDelete} />
             ))}
           </>
         )}
@@ -326,14 +403,39 @@ export default function App() {
                 </a>
               </div>
             )}
-            <button className="w-full mt-4 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl text-sm" onClick={() => setSelectedPost(null)}>
+            {isAdmin && (
+              <button className="w-full mt-4 bg-red-50 text-red-500 font-bold py-2.5 rounded-xl text-sm" onClick={() => handleDelete(selectedPost)}>
+                🗑️ この投稿を削除する
+              </button>
+            )}
+            <button className="w-full mt-2 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl text-sm" onClick={() => setSelectedPost(null)}>
               閉じる
             </button>
           </div>
         </div>
       )}
 
+      {/* 削除確認ダイアログ */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-60 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <p className="font-bold text-gray-900 mb-1">この投稿を削除しますか？</p>
+            <p className="text-sm text-gray-500 mb-1">「{deleteTarget.title}」</p>
+            <p className="text-xs text-red-500 mb-4">※ 削除すると元に戻せません</p>
+            <div className="flex gap-2">
+              <button className="flex-1 bg-gray-100 text-gray-600 font-bold py-2.5 rounded-xl text-sm" onClick={() => setDeleteTarget(null)}>
+                キャンセル
+              </button>
+              <button className="flex-1 bg-red-500 text-white font-bold py-2.5 rounded-xl text-sm" onClick={confirmDelete}>
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPostForm && <PostForm onClose={() => setShowPostForm(false)} />}
+      {showAdminLogin && <AdminLogin onSuccess={() => { setIsAdmin(true); setShowAdminLogin(false); }} onClose={() => setShowAdminLogin(false)} />}
 
       {/* Bottom nav */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg bg-white border-t border-gray-100 flex">
